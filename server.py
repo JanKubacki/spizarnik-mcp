@@ -57,6 +57,114 @@ def sprawdz_stany_magazynowe(store_id: str, krytyczny_poziom: bool = False) -> d
         "produkty": [dict(w) for w in wiersze],
     }
 
+@mcp.tool()
+def porownaj_dostawcow(nazwa_produktu: str, ilosc: int) -> dict:
+    """Porównuje oferty dostawców dla produktu i podanej ilości.
+    Zwraca ceny, całkowity koszt, minimum logistyczne i czas dostawy.
+    Nazwa produktu może być pełna lub stanowić fragment nazwy."""
+
+    if not nazwa_produktu.strip():
+        return {"blad": "Podaj nazwę produktu."}
+
+    if isinstance(ilosc, bool) or not isinstance(ilosc, int) or ilosc <= 0:
+        return {"blad": "Ilość musi być dodatnią liczbą całkowitą."}
+
+    with polacz() as conn:
+        # Najpierw szukamy dokładnej nazwy, potem fragmentu nazwy lub SKU.
+        produkt = conn.execute(
+            """
+            SELECT sku, nazwa
+            FROM produkty
+            WHERE lower(trim(nazwa)) = lower(trim(?))
+            """,
+            (nazwa_produktu,),
+        ).fetchall()
+
+        if not produkt:
+            produkt = conn.execute(
+                """
+                SELECT sku, nazwa
+                FROM produkty
+                WHERE lower(nazwa) LIKE lower(?)
+                   OR lower(sku) = lower(trim(?))
+                ORDER BY nazwa
+                """,
+                (f"%{nazwa_produktu.strip()}%", nazwa_produktu),
+            ).fetchall()
+
+        if not produkt:
+            return {
+                "blad": f"Nie znaleziono produktu: {nazwa_produktu}",
+                "wskazowka": "Sprawdź nazwę lub podaj SKU produktu.",
+            }
+
+        # Nie wybieramy arbitralnie, jeśli nazwa pasuje do wielu produktów.
+        if len(produkt) > 1:
+            return {
+                "komunikat": "Znaleziono kilka produktów. Doprecyzuj nazwę.",
+                "dopasowania": [
+                    {"sku": p["sku"], "nazwa": p["nazwa"]}
+                    for p in produkt
+                ],
+            }
+
+        p = produkt[0]
+
+        oferty = conn.execute(
+            """
+            SELECT
+                dostawca_id,
+                nazwa,
+                cena_hurtowa,
+                czas_dostawy_dni,
+                minimum_logistyczne
+            FROM dostawcy
+            WHERE sku = ?
+            ORDER BY cena_hurtowa ASC
+            """,
+            (p["sku"],),
+        ).fetchall()
+
+    if not oferty:
+        return {
+            "produkt": p["nazwa"],
+            "sku": p["sku"],
+            "ilosc_zamawiana": ilosc,
+            "komunikat": "Żaden dostawca nie oferuje tego produktu.",
+            "oferty": [],
+        }
+
+    porownanie = []
+
+    for o in oferty:
+        cena = o["cena_hurtowa"]
+        minimum = o["minimum_logistyczne"]
+        spelnia_minimum = ilosc >= minimum
+
+        porownanie.append({
+            "dostawca_id": o["dostawca_id"],
+            "dostawca": o["nazwa"],
+            "cena_jednostkowa": round(cena, 2),
+            "ilosc": ilosc,
+            "wartosc_zamowienia": round(cena * ilosc, 2),
+            "minimum_logistyczne": minimum,
+            "minimum_spelnione": spelnia_minimum,
+            "brakujace_sztuki": max(0, minimum - ilosc),
+            "czas_dostawy_dni": o["czas_dostawy_dni"],
+        })
+
+    return {
+        "produkt": p["nazwa"],
+        "sku": p["sku"],
+        "ilosc_zamawiana": ilosc,
+        "waluta": "PLN",
+        "liczba_ofert": len(porownanie),
+        "oferty": porownanie,
+        "uwaga": (
+            "Minimum logistyczne dotyczy danego produktu. "
+            "Baza nie określa minimalnej wartości całego zamówienia."
+        ),
+    }
 
 if __name__ == "__main__":
     mcp.run()
