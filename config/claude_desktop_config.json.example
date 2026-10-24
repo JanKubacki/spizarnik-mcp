@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "spizarnik_ai": {
+      "command": "uv",
+      "args": [
+        "--directory",
+        "C:\\SCIEZKA\\DO\\PROJEKTU\\spizarnik-mcp",
+        "run",
+        "server.py"
+      ]
+    }
+  }
+}
