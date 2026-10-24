@@ -218,3 +218,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Bazy danych SQLite (generowane lokalnie ze skryptu init_db.py)
+*.db
+*.sqlite
+data/*.db
