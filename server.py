@@ -5,6 +5,8 @@ from typing import Union, List, Dict, Any
 
 from mcp.server.mcpserver import MCPServer
 
+from contextlib import closing
+
 # Inicjalizacja serwera MCP dla systemu Spiżarnik AI (Spiżarnia Bez Dna Sp. z o.o.)
 mcp = MCPServer("Spizarnik AI Server")
 
@@ -23,6 +25,51 @@ def polacz() -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys = ON;")
     return conn
 
+@mcp.resource(
+    "spizarnik://sklepy",
+    name="Lista sklepów",
+    description="Aktualna lista sklepów wraz z ich identyfikatorami.",
+    mime_type="application/json",
+)
+def lista_sklepow_resource() -> dict[str, object]:
+    """Udostępnia aktualną listę sklepów jako zasób MCP."""
+    with closing(polacz()) as conn:
+        sklepy = [
+            dict(row)
+            for row in conn.execute(
+                "SELECT sklep_id, nazwa FROM sklepy ORDER BY sklep_id"
+            ).fetchall()
+        ]
+
+    return {
+        "liczba_sklepow": len(sklepy),
+        "sklepy": sklepy,
+    }
+
+@mcp.resource(
+    "spizarnik://produkty",
+    name="Katalog produktów",
+    description="Aktualny katalog produktów z kodami SKU i podstawowymi informacjami.",
+    mime_type="application/json",
+)
+def katalog_produktow_resource() -> dict[str, object]:
+    """Udostępnia katalog produktów z bazy SQLite."""
+    with closing(polacz()) as conn:
+        produkty = [
+            dict(row)
+            for row in conn.execute(
+                """
+                SELECT sku, nazwa, kategoria, cena_sprzedazy, okres_waznosci_dni
+                FROM produkty
+                ORDER BY kategoria, nazwa
+                """
+            ).fetchall()
+        ]
+
+    return {
+        "liczba_produktow": len(produkty),
+        "produkty": produkty,
+    }
 
 @mcp.tool()
 def hello_spizarnik() -> str:
