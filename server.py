@@ -1,17 +1,17 @@
 import json
 import sqlite3
+from contextlib import closing
 from pathlib import Path
-from typing import Union, List, Dict, Any
+from typing import Any, Dict, List, Union
 
 from mcp.server.mcpserver import MCPServer
-
-from contextlib import closing
 
 # Inicjalizacja serwera MCP dla systemu Spiżarnik AI (Spiżarnia Bez Dna Sp. z o.o.)
 mcp = MCPServer("Spizarnik AI Server")
 
-# Ścieżka do bazy SQLite wyliczana względem położenia tego pliku
+# Ścieżki do bazy SQLite oraz katalogu z dokumentacją (Single Source of Truth)
 DB_PATH = Path(__file__).parent / "data" / "spizarnia.db"
+DOCS_PATH = Path(__file__).parent / "docs"
 
 
 def polacz() -> sqlite3.Connection:
@@ -25,26 +25,41 @@ def polacz() -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys = ON;")
     return conn
 
+
+def odczytaj_plik_docs(nazwa_pliku: str, domyslna_tresc: str) -> str:
+    """Pomocnicza funkcja bezpiecznie odczytująca pliki Markdown z katalogu docs/."""
+    sciezka = DOCS_PATH / nazwa_pliku
+    if sciezka.exists():
+        return sciezka.read_text(encoding="utf-8")
+    return domyslna_tresc
+
+
+# ==============================================================================
+# MCP RESOURCES (Zasoby Kontekstowe - Wariant B: Dynamiczne źródła z bazy i docs/)
+# ==============================================================================
+
 @mcp.resource(
     "spizarnik://sklepy",
     name="Lista sklepów",
-    description="Aktualna lista sklepów wraz z ich identyfikatorami.",
+    description="Aktualna lista sklepów wraz z ich identyfikatorami i limitami budżetowymi.",
     mime_type="application/json",
 )
-def lista_sklepow_resource() -> dict[str, object]:
-    """Udostępnia aktualną listę sklepów jako zasób MCP."""
+def lista_sklepow_resource() -> str:
+    """Udostępnia aktualną listę sklepów z bazy danych jako zasób MCP w formacie JSON."""
     with closing(polacz()) as conn:
         sklepy = [
             dict(row)
             for row in conn.execute(
-                "SELECT sklep_id, nazwa FROM sklepy ORDER BY sklep_id"
+                "SELECT sklep_id, nazwa, limit_budzetu FROM sklepy ORDER BY sklep_id"
             ).fetchall()
         ]
 
-    return {
+    wynik = {
         "liczba_sklepow": len(sklepy),
         "sklepy": sklepy,
     }
+    return json.dumps(wynik, ensure_ascii=False, indent=2)
+
 
 @mcp.resource(
     "spizarnik://produkty",
@@ -52,8 +67,8 @@ def lista_sklepow_resource() -> dict[str, object]:
     description="Aktualny katalog produktów z kodami SKU i podstawowymi informacjami.",
     mime_type="application/json",
 )
-def katalog_produktow_resource() -> dict[str, object]:
-    """Udostępnia katalog produktów z bazy SQLite."""
+def katalog_produktow_resource() -> str:
+    """Udostępnia katalog produktów z bazy SQLite jako zasób MCP w formacie JSON."""
     with closing(polacz()) as conn:
         produkty = [
             dict(row)
@@ -66,10 +81,84 @@ def katalog_produktow_resource() -> dict[str, object]:
             ).fetchall()
         ]
 
-    return {
+    wynik = {
         "liczba_produktow": len(produkty),
         "produkty": produkty,
     }
+    return json.dumps(wynik, ensure_ascii=False, indent=2)
+
+
+@mcp.resource(
+    "spizarnik://regulamin",
+    name="Regulamin logistyki i AI Governance",
+    description="Wewnętrzny regulamin logistyki i zasady nadzoru ludzkiego czytane z pliku docs/regulamin_logistyki.md.",
+    mime_type="text/markdown",
+)
+def regulamin_resource() -> str:
+    """Odczytuje aktualną treść regulaminu z pliku docs/regulamin_logistyki.md."""
+    domyslna = """
+    === REGULAMIN LOGISTYKI I AI GOVERNANCE ===
+    Spiżarnia Bez Dna Sp. z o.o.
+    1. PROCEDURA NADZORU LUDZKIEGO (EU AI Act): Zamówienia generowane są jako 'projekt' i wymagają zatwierdzenia przez człowieka.
+    2. FINOPS: Projekty zamówień rezerwują budżet sklepu.
+    """
+    return odczytaj_plik_docs("regulamin_logistyki.md", domyslna)
+
+
+@mcp.resource(
+    "spizarnik://warunki-dostawcow",
+    name="Warunki kontraktowe i Supply Chain dostawców",
+    description="Szczegółowa specyfikacja hurtowni (D1, D2, D3), harmonogramy dostaw i kryteria wyboru oferty.",
+    mime_type="application/json",
+)
+def warunki_dostawcow_resource() -> str:
+    """Udostępnia profile dostawców i zestawienie dostępnych ofert hurtowych z bazy w formacie JSON."""
+    with closing(polacz()) as conn:
+        oferty = [
+            dict(row)
+            for row in conn.execute(
+                """
+                SELECT d.dostawca_id, d.nazwa AS dostawca_nazwa, d.sku, p.nazwa AS produkt_nazwa,
+                       d.cena_hurtowa, d.czas_dostawy_dni, d.minimum_logistyczne
+                FROM dostawcy d
+                JOIN produkty p ON d.sku = p.sku
+                ORDER BY d.dostawca_id, p.nazwa
+                """
+            ).fetchall()
+        ]
+
+    wynik = {
+        "opis": "Baza umów B2B z dostawcami Spiżarni Bez Dna Sp. z o.o.",
+        "profil_dostawcow": {
+            "D1_MlekoHurt": "Specjalizacja: Nabiał. Szybka dostawa (1 dzień), małe minima logistyczne. Realizacja dostaw od poniedziałku do piątku.",
+            "D2_WarzywaExpress": "Specjalizacja: Świeże warzywa i owoce. Czas dostawy: 1 dzień. Wymagany natychmiastowy odbiór jakościowy przy przyjęciu.",
+            "D3_HurtoSfera": "Specjalizacja: Hurtownia ogólnoasortymentowa. Niższe ceny hurtowe, ale dłuższy czas dostawy (3 dni) i wyższe minima logistyczne."
+        },
+        "oferty_hurtowe": oferty
+    }
+    return json.dumps(wynik, ensure_ascii=False, indent=2)
+
+
+@mcp.resource(
+    "spizarnik://rodo-compliance",
+    name="Polityka ochrony danych RODO i Compliance",
+    description="Zasady anonimizacji danych osobowych i ograniczeń prawne czytane z pliku docs/rodo_compliance.md.",
+    mime_type="text/markdown",
+)
+def rodo_compliance_resource() -> str:
+    """Odczytuje zasady ochrony danych i RODO z pliku docs/rodo_compliance.md."""
+    domyslna = """
+    === POLITYKA OCHRONY DANYCH OSOBOWYCH (RODO/GDPR) ===
+    Spiżarnia Bez Dna Sp. z o.o.
+    1. System AI operuje wyłącznie na identyfikatorach technicznych B2B.
+    2. Dane osobowe są filtrowane przed przekazaniem do LLM.
+    """
+    return odczytaj_plik_docs("rodo_compliance.md", domyslna)
+
+
+# ==============================================================================
+# MCP PROMPTS (Parametryzowane Szablony Procedur Biznesowych)
+# ==============================================================================
 
 @mcp.prompt(
     name="przygotuj_uzupelnienie_zapasow",
@@ -149,6 +238,11 @@ Nie wyciągaj wniosków o przyczynach braku towaru, sprzedaży ani prognozach,
 jeśli nie ma takich danych. Jeśli nie ma produktów poniżej poziomu
 bezpieczeństwa, poinformuj o tym. Nie twórz zamówienia.
 """
+
+
+# ==============================================================================
+# MCP TOOLS (Narzędzia Biznesowe i Operacyjne)
+# ==============================================================================
 
 @mcp.tool()
 def hello_spizarnik() -> str:
