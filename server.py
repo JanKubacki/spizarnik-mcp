@@ -71,6 +71,85 @@ def katalog_produktow_resource() -> dict[str, object]:
         "produkty": produkty,
     }
 
+@mcp.prompt(
+    name="przygotuj_uzupelnienie_zapasow",
+    title="Przygotuj uzupełnienie zapasów",
+    description="Analizuje krytyczne stany i przygotowuje propozycję zamówienia do akceptacji.",
+)
+def prompt_uzupelnienie_zapasow(sklep_id: str) -> str:
+    """Przygotowuje propozycję uzupełnienia krytycznych zapasów w wybranym sklepie."""
+    return f"""
+Przygotuj propozycję uzupełnienia krytycznych zapasów w sklepie: {sklep_id}.
+
+1. Użyj narzędzia sprawdz_stany_magazynowe dla sklepu {sklep_id},
+   ustawiając krytyczny_poziom=True.
+2. Dla każdego zwróconego produktu oblicz brakującą ilość:
+   zapas_bezpieczenstwa - ilosc.
+3. Dla każdego produktu użyj porownaj_dostawcow, przekazując SKU produktu
+   i obliczoną brakującą ilość.
+4. Porównaj cenę, czas dostawy i minimum logistyczne. Jako domyślne kryterium
+   rekomenduj najtańszą ofertę spełniającą minimum; przy remisie krótszy czas dostawy.
+5. Jeśli minimum dostawcy wymaga zamówienia większej ilości, pokaż tę różnicę
+   i poproś użytkownika o zgodę na zwiększenie ilości.
+6. Przedstaw podsumowanie: sklep, produkt, stan obecny, zapas bezpieczeństwa,
+   proponowana ilość, dostawca, koszt i czas dostawy.
+7. Nie wywołuj generuj_zamowienie bez wyraźnej zgody użytkownika.
+   Utworzenie projektu rezerwuje środki w budżecie.
+8. Po uzyskaniu zgody pogrupuj pozycje według dostawcy. Narzędzie
+   generuj_zamowienie obsługuje jednego dostawcę na jedno zamówienie,
+   więc dla różnych dostawców utwórz osobne projekty.
+9. Nie zatwierdzaj zamówień. Zatwierdzenie wymaga osobnej decyzji człowieka.
+
+Jeśli nie ma krytycznych produktów albo brakuje danych do porównania,
+powiedz to wprost i nie zgaduj.
+"""
+
+
+@mcp.prompt(
+    name="porownaj_oferty_dostawcow",
+    title="Porównaj oferty dostawców",
+    description="Porównuje oferty dostawców dla produktu i wskazanej ilości.",
+)
+def prompt_porownaj_oferty_dostawcow(
+    nazwa_produktu: str,
+    ilosc: int,
+) -> str:
+    """Porównuje dostępne oferty bez tworzenia zamówienia."""
+    return f"""
+Porównaj oferty dostawców dla produktu „{nazwa_produktu}” w ilości {ilosc} sztuk.
+
+Użyj narzędzia porownaj_dostawcow z podanym produktem i ilością.
+Przedstaw osobno dla każdej oferty: dostawcę, cenę jednostkową, całkowitą
+wartość, minimum logistyczne, brakującą liczbę sztuk do minimum i czas dostawy.
+
+Wskaż najtańszą ofertę, która spełnia minimum logistyczne. Jeśli żadna
+oferta go nie spełnia, wyjaśnij, ile sztuk brakuje do minimum w każdej ofercie.
+Nie zmieniaj samodzielnie zamawianej ilości i nie twórz zamówienia.
+Jeśli produkt jest niejednoznaczny lub nie ma ofert, poproś o doprecyzowanie
+albo jasno poinformuj o braku ofert.
+"""
+
+
+@mcp.prompt(
+    name="wyjasnij_krytyczne_stany",
+    title="Wyjaśnij krytyczne stany",
+    description="Pokazuje produkty poniżej zapasu bezpieczeństwa i wyjaśnia różnicę.",
+)
+def prompt_wyjasnij_krytyczne_stany(sklep_id: str) -> str:
+    """Wyjaśnia, które produkty w sklepie wymagają uzupełnienia."""
+    return f"""
+Sprawdź krytyczne stany magazynowe w sklepie {sklep_id}.
+
+Użyj narzędzia sprawdz_stany_magazynowe dla sklepu {sklep_id},
+ustawiając krytyczny_poziom=True. Dla każdego zwróconego produktu podaj
+nazwę, SKU, aktualną ilość i zapas bezpieczeństwa. Wyjaśnij różnicę
+(ile sztuk brakuje do poziomu bezpieczeństwa).
+
+Nie wyciągaj wniosków o przyczynach braku towaru, sprzedaży ani prognozach,
+jeśli nie ma takich danych. Jeśli nie ma produktów poniżej poziomu
+bezpieczeństwa, poinformuj o tym. Nie twórz zamówienia.
+"""
+
 @mcp.tool()
 def hello_spizarnik() -> str:
     """Funkcja testowa weryfikująca połączenie z serwerem MCP."""
