@@ -7,11 +7,17 @@ DELETE FROM produkty;
 DELETE FROM sklepy;
 DELETE FROM sqlite_sequence WHERE name = 'zamowienia';
 
--- 2. Sklepy (limity budżetu miesięczne, przeskalowane do 18 produktów)
+-- 2. Sklepy
+--    limit_budzetu = budżet, który sklepowi JESZCZE ZOSTAŁ (serwer zmniejsza go
+--    przy każdym nowym projekcie zamówienia i zwiększa przy anulowaniu).
+--    Wartości uwzględniają zamówienia z punktu 6 (poza anulowanym nr 4):
+--    S1: 8000.00 - 250.80 (nr 3, projekt)      = 7749.20
+--    S2: 6000.00 - 308.00 (nr 2, zatwierdzone) = 5692.00
+--    S3: 2000.00 - 1674.20 (nr 1, dostarczone) = 325.80
 INSERT INTO sklepy (sklep_id, nazwa, limit_budzetu) VALUES
-('S1', 'Sklep Nr 1 Centrum', 8000),
-('S2', 'Sklep Nr 2 Mokotów', 6000),
-('S3', 'Sklep Nr 3 Osiedle', 2000);
+('S1', 'Sklep Nr 1 Centrum', 7749.20),
+('S2', 'Sklep Nr 2 Mokotów', 5692.00),
+('S3', 'Sklep Nr 3 Osiedle', 325.80);
 
 -- 3. Produkty
 INSERT INTO produkty (sku, nazwa, kategoria, cena_sprzedazy, okres_waznosci_dni) VALUES

@@ -71,6 +71,101 @@ def znajdz_sklep(conn: sqlite3.Connection, tekst: str):
     }
 
 
+def znajdz_dostawce(conn: sqlite3.Connection, tekst: str):
+    """Szuka dostawcy po ID ('D1') albo po nazwie lub jej fragmencie ('MlekoHurt').
+    Zwraca (dostawca, None), gdy jest dokładnie jedno dopasowanie,
+    albo (None, slownik_z_bledem), gdy nie ma żadnego albo jest ich kilka."""
+    tekst = str(tekst).strip()
+    if not tekst:
+        return None, {"blad": "Podaj identyfikator lub nazwę dostawcy."}
+
+    # 1. Dokładne ID albo dokładna nazwa, np. 'D1' albo 'MlekoHurt'
+    dokladne = conn.execute(
+        """
+        SELECT DISTINCT dostawca_id, nazwa FROM dostawcy
+        WHERE LOWER(dostawca_id) = LOWER(?) OR LOWER(nazwa) = LOWER(?)
+        """,
+        (tekst, tekst),
+    ).fetchall()
+    if len(dokladne) == 1:
+        return dokladne[0], None
+
+    # 2. Fragment nazwy, np. 'Mleko'
+    pasujace = conn.execute(
+        """
+        SELECT DISTINCT dostawca_id, nazwa FROM dostawcy
+        WHERE LOWER(nazwa) LIKE LOWER(?)
+        ORDER BY dostawca_id
+        """,
+        (f"%{tekst}%",),
+    ).fetchall()
+
+    if len(pasujace) == 1:
+        return pasujace[0], None
+
+    if not pasujace:
+        wszyscy = conn.execute(
+            "SELECT DISTINCT dostawca_id, nazwa FROM dostawcy ORDER BY dostawca_id"
+        ).fetchall()
+        return None, {
+            "blad": f"Nie znaleziono dostawcy '{tekst}'.",
+            "dostepni_dostawcy": [f"{d['nazwa']} ({d['dostawca_id']})" for d in wszyscy],
+        }
+
+    return None, {
+        "blad": f"Nazwa '{tekst}' pasuje do kilku dostawców. Doprecyzuj, o którego chodzi.",
+        "pasujacy_dostawcy": [f"{d['nazwa']} ({d['dostawca_id']})" for d in pasujace],
+    }
+
+
+def znajdz_oferte(conn: sqlite3.Connection, dostawca_id: str, tekst: str):
+    """Szuka produktu w ofercie wskazanego dostawcy po SKU ('NAB-001') albo po nazwie.
+    Zwraca (oferta, None), gdy jest dokładnie jedno dopasowanie,
+    albo (None, slownik_z_bledem), gdy nie ma żadnego albo jest ich kilka."""
+    tekst = str(tekst).strip()
+    zapytanie = """
+        SELECT d.sku, d.cena_hurtowa, d.minimum_logistyczne, p.nazwa AS produkt_nazwa
+        FROM dostawcy d
+        JOIN produkty p ON d.sku = p.sku
+        WHERE d.dostawca_id = ? AND {warunek}
+        ORDER BY p.nazwa
+    """
+
+    # 1. Dokładne SKU albo dokładna nazwa produktu
+    dokladne = conn.execute(
+        zapytanie.format(warunek="(LOWER(d.sku) = LOWER(?) OR LOWER(p.nazwa) = LOWER(?))"),
+        (dostawca_id, tekst, tekst),
+    ).fetchall()
+    if len(dokladne) == 1:
+        return dokladne[0], None
+
+    # 2. Fragment nazwy, np. 'Mleko'
+    pasujace = conn.execute(
+        zapytanie.format(warunek="LOWER(p.nazwa) LIKE LOWER(?)"),
+        (dostawca_id, f"%{tekst}%"),
+    ).fetchall()
+
+    if len(pasujace) == 1:
+        return pasujace[0], None
+
+    if not pasujace:
+        oferta = conn.execute(
+            zapytanie.format(warunek="1 = 1"), (dostawca_id,)
+        ).fetchall()
+        return None, {
+            "blad": f"Ten dostawca nie ma w ofercie produktu '{tekst}'.",
+            "oferta_dostawcy": [
+                f"{o['produkt_nazwa']} (SKU: {o['sku']}, minimum: {o['minimum_logistyczne']} szt.)"
+                for o in oferta
+            ],
+        }
+
+    return None, {
+        "blad": f"Nazwa '{tekst}' pasuje do kilku produktów tego dostawcy. Doprecyzuj albo podaj SKU.",
+        "pasujace_produkty": [f"{o['produkt_nazwa']} (SKU: {o['sku']})" for o in pasujace],
+    }
+
+
 # ==============================================================================
 # MCP RESOURCES (Zasoby Kontekstowe - Wariant B: Dynamiczne źródła z bazy i docs/)
 # ==============================================================================
@@ -476,17 +571,9 @@ def generuj_zamowienie(
             limit_budzetu = float(sklep["limit_budzetu"])
 
             # 2. Identyfikacja dostawcy
-            dostawca_rec = cursor.execute(
-                """
-                SELECT DISTINCT dostawca_id, nazwa FROM dostawcy 
-                WHERE LOWER(dostawca_id) = LOWER(?) OR LOWER(nazwa) LIKE LOWER(?)
-                """,
-                (dostawca_param, f"%{dostawca_param}%")
-            ).fetchone()
-
-            if dostawca_rec is None:
-                dostepni = [f"{w['nazwa']} (ID: {w['dostawca_id']})" for w in cursor.execute("SELECT DISTINCT dostawca_id, nazwa FROM dostawcy")]
-                return {"blad": f"Nie znaleziono dostawcy '{dostawca_param}'. Dostępni dostawcy: {dostepni}"}
+            dostawca_rec, blad = znajdz_dostawce(conn, dostawca_param)
+            if blad:
+                return blad
 
             real_dostawca_id = dostawca_rec["dostawca_id"]
             dostawca_nazwa = dostawca_rec["nazwa"]
@@ -504,27 +591,10 @@ def generuj_zamowienie(
 
                 term = str(szukana_nazwa_lub_sku).strip()
 
-                oferta = cursor.execute(
-                    """
-                    SELECT d.sku, d.cena_hurtowa, d.minimum_logistyczne, p.nazwa AS produkt_nazwa
-                    FROM dostawcy d
-                    JOIN produkty p ON d.sku = p.sku
-                    WHERE d.dostawca_id = ? AND (LOWER(d.sku) = LOWER(?) OR LOWER(p.nazwa) LIKE LOWER(?))
-                    """,
-                    (real_dostawca_id, term, f"%{term}%")
-                ).fetchone()
-
-                if oferta is None:
-                    oferty_dostawcy = [
-                        f"{w['produkt_nazwa']} (SKU: {w['sku']}, Min: {w['minimum_logistyczne']} szt.)"
-                        for w in cursor.execute(
-                            "SELECT p.nazwa AS produkt_nazwa, d.sku, d.minimum_logistyczne FROM dostawcy d JOIN produkty p ON d.sku = p.sku WHERE d.dostawca_id = ?",
-                            (real_dostawca_id,)
-                        ).fetchall()
-                    ]
-                    return {
-                        "blad": f"Dostawca '{dostawca_nazwa}' nie ma w ofercie produktu '{term}'. Oferta dostawcy: {oferty_dostawcy}"
-                    }
+                oferta, blad = znajdz_oferte(conn, real_dostawca_id, term)
+                if blad:
+                    blad["dostawca"] = dostawca_nazwa
+                    return blad
 
                 sku_real = oferta["sku"]
                 nazwa_prod = oferta["produkt_nazwa"]
@@ -581,7 +651,7 @@ def generuj_zamowienie(
                     (zamowienie_id, item["sku"], item["ilosc"], item["cena_jednostkowa"])
                 )
 
-            nowy_limit = limit_budzetu - laczna_wartosc
+            nowy_limit = round(limit_budzetu - laczna_wartosc, 2)
             cursor.execute(
                 "UPDATE sklepy SET limit_budzetu = ? WHERE sklep_id = ?",
                 (nowy_limit, real_sklep_id)
@@ -694,7 +764,7 @@ def anuluj_zamowienie(zamowienie_id: int) -> dict:
             wartosc = float(zamowienie["wartosc"])
 
             cursor.execute(
-                "UPDATE sklepy SET limit_budzetu = limit_budzetu + ? WHERE sklep_id = ?",
+                "UPDATE sklepy SET limit_budzetu = ROUND(limit_budzetu + ?, 2) WHERE sklep_id = ?",
                 (wartosc, sklep_id)
             )
 
