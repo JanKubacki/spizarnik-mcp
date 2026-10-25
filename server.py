@@ -34,6 +34,43 @@ def odczytaj_plik_docs(nazwa_pliku: str, domyslna_tresc: str) -> str:
     return domyslna_tresc
 
 
+def znajdz_sklep(conn: sqlite3.Connection, tekst: str):
+    """Szuka sklepu po ID ('S2') albo po nazwie lub jej fragmencie ('Mokotów').
+    Zwraca (sklep, None), gdy jest dokładnie jedno dopasowanie,
+    albo (None, slownik_z_bledem), gdy nie ma żadnego albo jest ich kilka."""
+    tekst = str(tekst).strip()
+    if not tekst:
+        return None, {"blad": "Podaj identyfikator lub nazwę sklepu."}
+
+    # 1. Najpierw dokładne ID, np. 'S2' albo 's2'
+    sklep = conn.execute(
+        "SELECT * FROM sklepy WHERE LOWER(sklep_id) = LOWER(?)", (tekst,)
+    ).fetchone()
+    if sklep:
+        return sklep, None
+
+    # 2. Potem fragment nazwy, np. 'Mokotów'
+    pasujace = conn.execute(
+        "SELECT * FROM sklepy WHERE LOWER(nazwa) LIKE LOWER(?) ORDER BY sklep_id",
+        (f"%{tekst}%",),
+    ).fetchall()
+
+    if len(pasujace) == 1:
+        return pasujace[0], None
+
+    if not pasujace:
+        wszystkie = conn.execute("SELECT sklep_id, nazwa FROM sklepy ORDER BY sklep_id").fetchall()
+        return None, {
+            "blad": f"Nie znaleziono sklepu '{tekst}'.",
+            "dostepne_sklepy": [f"{s['nazwa']} ({s['sklep_id']})" for s in wszystkie],
+        }
+
+    return None, {
+        "blad": f"Nazwa '{tekst}' pasuje do kilku sklepów. Doprecyzuj, o który chodzi.",
+        "pasujace_sklepy": [f"{s['nazwa']} ({s['sklep_id']})" for s in pasujace],
+    }
+
+
 # ==============================================================================
 # MCP RESOURCES (Zasoby Kontekstowe - Wariant B: Dynamiczne źródła z bazy i docs/)
 # ==============================================================================
@@ -260,17 +297,9 @@ def sprawdz_stany_magazynowe(store_id: str, krytyczny_poziom: bool = False) -> d
         krytyczny_poziom: Jeśli True, filtruje produkty wymagające pilnego uzupełnienia.
     """
     with polacz() as conn:
-        sklep = conn.execute(
-            """
-            SELECT sklep_id, nazwa FROM sklepy 
-            WHERE LOWER(sklep_id) = LOWER(?) OR LOWER(nazwa) LIKE LOWER(?)
-            """,
-            (store_id.strip(), f"%{store_id.strip()}%")
-        ).fetchone()
-
-        if sklep is None:
-            dostepne = [f"{w['nazwa']} ({w['sklep_id']})" for w in conn.execute("SELECT sklep_id, nazwa FROM sklepy")]
-            return {"blad": f"Nie znaleziono sklepu '{store_id}'. Dostępne sklepy: {dostepne}"}
+        sklep, blad = znajdz_sklep(conn, store_id)
+        if blad:
+            return blad
 
         real_sklep_id = sklep["sklep_id"]
 
@@ -439,17 +468,9 @@ def generuj_zamowienie(
             cursor = conn.cursor()
 
             # 1. Identyfikacja sklepu i weryfikacja limitu budżetu
-            sklep = cursor.execute(
-                """
-                SELECT sklep_id, nazwa, limit_budzetu FROM sklepy 
-                WHERE LOWER(sklep_id) = LOWER(?) OR LOWER(nazwa) LIKE LOWER(?)
-                """,
-                (sklep_param, f"%{sklep_param}%")
-            ).fetchone()
-
-            if sklep is None:
-                dostepne = [f"{w['nazwa']} ({w['sklep_id']})" for w in cursor.execute("SELECT sklep_id, nazwa FROM sklepy")]
-                return {"blad": f"Nie znaleziono sklepu '{sklep_param}'. Dostępne sklepy: {dostepne}"}
+            sklep, blad = znajdz_sklep(conn, sklep_param)
+            if blad:
+                return blad
 
             real_sklep_id = sklep["sklep_id"]
             limit_budzetu = float(sklep["limit_budzetu"])
