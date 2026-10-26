@@ -428,13 +428,13 @@ def porownaj_dostawcow(nazwa_produktu: str, ilosc: int = 1) -> dict:
         ilosc: Zamawiana ilość w sztukach (domyślnie 1).
     """
     if not str(nazwa_produktu).strip():
-        return {"blad": "Podaj nazwę lub SKU produktu."}
+        return {"status": "error", "blad": "Podaj nazwę lub SKU produktu."}
 
     if isinstance(ilosc, bool) or not isinstance(ilosc, int) or ilosc <= 0:
-        return {"blad": "Ilość musi być dodatnią liczbą całkowitą."}
+        return {"status": "error", "blad": "Ilość musi być dodatnią liczbą całkowitą."}
 
     with polacz() as conn:
-        # Najpierw szukamy dokładnej nazwy, potem fragmentu nazwy lub SKU
+        # 1. Dokładne dopasowanie po nazwie
         produkt = conn.execute(
             """
             SELECT sku, nazwa
@@ -444,6 +444,7 @@ def porownaj_dostawcow(nazwa_produktu: str, ilosc: int = 1) -> dict:
             (nazwa_produktu,),
         ).fetchall()
 
+        # 2. Wyszukiwanie po fragmencie nazwy lub SKU
         if not produkt:
             produkt = conn.execute(
                 """
@@ -458,12 +459,14 @@ def porownaj_dostawcow(nazwa_produktu: str, ilosc: int = 1) -> dict:
 
         if not produkt:
             return {
+                "status": "error",
                 "blad": f"Nie znaleziono produktu: {nazwa_produktu}",
                 "wskazowka": "Sprawdź nazwę lub podaj SKU produktu.",
             }
 
         if len(produkt) > 1:
             return {
+                "status": "ambiguous",
                 "komunikat": "Znaleziono kilka pasujących produktów. Doprecyzuj nazwę.",
                 "dopasowania": [
                     {"sku": p["sku"], "nazwa": p["nazwa"]}
@@ -490,39 +493,58 @@ def porownaj_dostawcow(nazwa_produktu: str, ilosc: int = 1) -> dict:
 
     if not oferty:
         return {
+            "status": "SUKCES",
             "produkt": p["nazwa"],
             "sku": p["sku"],
             "ilosc_zamawiana": ilosc,
             "komunikat": "Żaden dostawca nie oferuje tego produktu.",
             "oferty": [],
+            "rekomendacja": "Brak dostępnych ofert dostawców dla tego produktu."
         }
 
     porownanie = []
+    wazne_oferty = []
 
     for o in oferty:
         cena = o["cena_hurtowa"]
         minimum = o["minimum_logistyczne"]
         spelnia_minimum = ilosc >= minimum
+        wartosc = round(cena * ilosc, 2)
 
-        porownanie.append({
+        o_dict = {
             "dostawca_id": o["dostawca_id"],
             "dostawca": o["nazwa"],
             "cena_jednostkowa": round(cena, 2),
             "ilosc": ilosc,
-            "wartosc_zamowienia": round(cena * ilosc, 2),
+            "wartosc_zamowienia": wartosc,
             "minimum_logistyczne": minimum,
             "minimum_spelnione": spelnia_minimum,
             "brakujace_sztuki": max(0, minimum - ilosc),
             "czas_dostawy_dni": o["czas_dostawy_dni"],
-        })
+        }
+        porownanie.append(o_dict)
+        if spelnia_minimum:
+            wazne_oferty.append(o_dict)
+
+    # Budowanie rekomendacji dla modelu LLM oraz testów jednostkowych
+    if wazne_oferty:
+        najlepsza = min(wazne_oferty, key=lambda x: (x["wartosc_zamowienia"], x["czas_dostawy_dni"]))
+        rekomendacja = (
+            f"Rekomendowany dostawca: {najlepsza['dostawca']} ({najlepsza['dostawca_id']}) - "
+            f"koszt: {najlepsza['wartosc_zamowienia']} PLN, czas dostawy: {najlepsza['czas_dostawy_dni']} d."
+        )
+    else:
+        rekomendacja = "Brak dostawców spełniających minimum logistyczne przy tej ilości zamówienia."
 
     return {
+        "status": "SUKCES",
         "produkt": p["nazwa"],
         "sku": p["sku"],
         "ilosc_zamawiana": ilosc,
         "waluta": "PLN",
         "liczba_ofert": len(porownanie),
         "oferty": porownanie,
+        "rekomendacja": rekomendacja,
         "uwaga": (
             "Minimum logistyczne dotyczy danego produktu. "
             "Baza nie określa minimalnej wartości całego zamówienia."
