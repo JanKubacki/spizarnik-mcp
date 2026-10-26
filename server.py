@@ -865,5 +865,63 @@ def rejestruj_dostawe(zamowienie_id: int) -> dict:
         return {"blad": f"Błąd bazy danych SQLite: {str(e)}"}
 
 
+# ==============================================================================
+# MCP RESOURCES (Zasoby MCP - Sekcja 2.2 Specyfikacji)
+# ==============================================================================
+
+@mcp.resource("spizarnik://regulamin_logistyki")
+def pobierz_regulamin_logistyki() -> str:
+    """Zwraca treść regulaminu logistyki i nadzoru ludzkiego w sieci Spiżarnia Bez Dna."""
+    return (
+        "=== REGULAMIN LOGISTYKI I ZARZĄDZANIA ZAPASAMI SPIŻARNIK AI ===\n"
+        "1. Każde nowe zamówienie generowane przez system AI otrzymuje status 'projekt'.\n"
+        "2. Wyłącznym podmiotem uprawnionym do zatwierdzenia zamówienia jest Kierownik Sklepu (Człowiek).\n"
+        "3. System AI nie posiada uprawnień do samodzielnego wywoływania narzędzia zatwierdz_zamowienie.\n"
+        "4. Budżet sklepu jest rezerwowany w momencie utworzenia projektu i zwracany w przypadku anulowania."
+    )
+
+@mcp.resource("spizarnik://lista_sklepow")
+def pobierz_liste_sklepow() -> str:
+    """Zwraca aktualną listę sklepów sieci wraz z ich identyfikatorami i limitami budżetu."""
+    import sqlite3
+    conn = sqlite3.connect("data/spizarnia.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT sklep_id, nazwa, limit_budzetu FROM sklepy")
+    rows = cursor.fetchall()
+    conn.close()
+    
+    wynik = ["ID Sklepu | Nazwa Sklepu | Limit Budżetu (PLN)", "-" * 45]
+    for r in rows:
+        wynik.append(f"{r[0]} | {r[1]} | {r[2]:.2f} zł")
+    return "\n".join(wynik)
+
+# ==============================================================================
+# MCP PROMPTS (Prompty Scenariuszowe - Sekcja 2.2 Specyfikacji)
+# ==============================================================================
+
+@mcp.prompt("przygotuj_uzupelnienie_zapasow")
+def prompt_przygotuj_uzupelnienie(sklep_id: str) -> str:
+    """
+    Szablon promptu generujący analizę braków i propozycję zamówień dla wybranego sklepu.
+    """
+    return (
+        f"Przeanalizuj braki magazynowe w sklepie {sklep_id} poniżej zapasu bezpieczeństwa "
+        f"używając narzędzia sprawdz_stany_magazynowe. Następnie porównaj oferty dostawców "
+        f"narzędziem porownaj_dostawcow dla brakujących produktów i przedstaw rekomendację zamówień. "
+        f"Na końcu zapytaj kierownika o zgodę na utworzenie projektów zamówień."
+    )
+
+@mcp.prompt("wyjasnij_krytyczne_stany")
+def prompt_wyjasnij_krytyczne_stany(sklep_id: str) -> str:
+    """
+    Szablon promptu zestawiąjącego braki magazynowe bez tworzenia zamówień ani prognoz.
+    """
+    return (
+        f"Wyświetl wszystkie produkty w sklepie {sklep_id}, których stan jest poniżej zapasu "
+        f"bezpieczeństwa. Podaj dokładnie obecny stan oraz brakującą ilość. Nie generuj "
+        f"prognoz sprzedaży ani nie twórz zamówień."
+    )
+
+
 if __name__ == "__main__":
     mcp.run()
