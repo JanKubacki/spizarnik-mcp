@@ -128,13 +128,19 @@ Mechanizmy pomocnicze:
 | `spizarnik://regulamin` | Regulamin logistyki i AI Governance | `docs/regulamin_logistyki.md` |
 | `spizarnik://rodo-compliance` | Polityka ochrony danych | `docs/rodo_compliance.md` |
 
-### Prompts (3)
+### Prompts (7)
 
 | Prompt | Parametry | Cel |
 |---|---|---|
 | `przygotuj_uzupelnienie_zapasow` | `sklep_id` | Analiza braków, porównanie dostawców, propozycja zamówienia. **Wymaga zgody użytkownika** przed `generuj_zamowienie` i zabrania zatwierdzania zamówień |
 | `porownaj_oferty_dostawcow` | `nazwa_produktu`, `ilosc` | Porównanie ofert bez tworzenia zamówienia |
 | `wyjasnij_krytyczne_stany` | `sklep_id` | Zestawienie produktów poniżej zapasu bezpieczeństwa, bez prognoz i zamówień |
+| `zatwierdz_projekt_zamowienia` | `zamowienie_id` | Wymaga jawnej zgody na zatwierdzenie konkretnego projektu; wyjaśnia, że w prototypie zmienia status w bazie, ale nie wysyła zamówienia |
+| `anuluj_projekt_zamowienia` | `zamowienie_id` | Wymaga jawnej zgody i znanego statusu; odmawia anulowania zatwierdzonego zamówienia w tym przepływie |
+| `zarejestruj_otrzymana_dostawe` | `zamowienie_id` | Wymaga potwierdzenia fizycznego otrzymania całej dostawy zgodnej z pozycjami zamówienia |
+| `sprawdz_polaczenie_spizarnika` | — | Uruchamia wyłącznie nieszkodliwy test połączenia `hello_spizarnik` |
+
+Prompty są instrukcjami dla modelu, a nie technicznym mechanizmem autoryzacji. Nie zastępują walidacji narzędzi ani potwierdzenia użytkownika w kliencie MCP.
 
 ## 6. Cykl życia zamówienia i nadzór ludzki
 

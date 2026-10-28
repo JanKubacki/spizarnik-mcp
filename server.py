@@ -373,6 +373,112 @@ bezpieczeństwa, poinformuj o tym. Nie twórz zamówienia.
 
 
 # ==============================================================================
+# PROMPTS (Obsługa bezpiecznego cyklu życia zamówienia)
+# ==============================================================================
+
+@mcp.prompt(
+    name="zatwierdz_projekt_zamowienia",
+    title="Zatwierdź projekt zamówienia",
+    description="Przeprowadza operatora przez świadome zatwierdzenie projektu zamówienia.",
+)
+def prompt_zatwierdz_projekt_zamowienia(zamowienie_id: int) -> str:
+    """Przygotowuje bezpieczny scenariusz zatwierdzenia konkretnego projektu."""
+    return f"""
+Pomóż operatorowi zatwierdzić projekt zamówienia nr #{zamowienie_id}.
+
+1. Upewnij się, że użytkownik wyraźnie prosi o zatwierdzenie właśnie tego
+   zamówienia. Wcześniejsza zgoda na przygotowanie projektu, ogólne
+   „kontynuuj” ani samo uruchomienie tego promptu nie oznaczają zgody.
+2. Przed zmianą statusu przedstaw wiarygodne informacje dostępne w bieżącej
+   rozmowie: numer, sklep, dostawcę i wartość. Nie zgaduj brakujących danych.
+   Jeśli brakuje kontekstu, poproś o jego potwierdzenie.
+3. Wyjaśnij, że narzędzie zmieni status z „projekt” na „zatwierdzone”.
+   W tym prototypie aktualizuje bazę danych; nie twierdź, że wysłało
+   zamówienie do dostawcy.
+4. Dopiero po jednoznacznym potwierdzeniu użytkownika wywołaj
+   zatwierdz_zamowienie(zamowienie_id={zamowienie_id}). Nie ponawiaj
+   wywołania po błędzie bez ustalenia przyczyny.
+5. Podaj rzeczywisty wynik narzędzia. Przy błędzie lub nieznanym statusie
+   zatrzymaj proces i jasno wyjaśnij sytuację.
+
+Narzędzie samo sprawdza, czy zamówienie istnieje i ma status „projekt”.
+Nie zastępuj tej walidacji domysłami.
+"""
+
+
+@mcp.prompt(
+    name="anuluj_projekt_zamowienia",
+    title="Anuluj projekt zamówienia",
+    description="Prowadzi przez świadome anulowanie projektu i wyjaśnia zwrot budżetu.",
+)
+def prompt_anuluj_projekt_zamowienia(zamowienie_id: int) -> str:
+    """Przygotowuje ostrożny scenariusz anulowania projektu zamówienia."""
+    return f"""
+Pomóż anulować zamówienie nr #{zamowienie_id}.
+
+1. Wymagaj jawnej prośby o anulowanie dokładnie tego numeru. Nie wywodź zgody
+   z wcześniejszej rozmowy ani z samego uruchomienia promptu.
+2. Przed wywołaniem ustal na podstawie wiarygodnych informacji w bieżącej
+   rozmowie, że zamówienie nie jest dostarczone. Wyjaśnij skutek: status stanie
+   się „anulowane”, a zarezerwowana kwota wróci do budżetu sklepu. Nie zakładaj
+   nieznanego statusu.
+3. Nie ma narzędzia do odczytu zamówienia. Jeśli status jest nieznany, poproś
+   użytkownika o jego potwierdzenie. Nie anuluj zamówienia o statusie
+   „zatwierdzone” — wstrzymaj się i poproś o ręczne wyjaśnienie lub obsługę
+   poza tym przepływem. Narzędzie odrzuca anulowanie zamówienia dostarczonego,
+   ale dopuszcza anulowanie zatwierdzonego.
+4. Po jednoznacznym potwierdzeniu wywołaj wyłącznie
+   anuluj_zamowienie(zamowienie_id={zamowienie_id}). Nie używaj SQL ani innych
+   narzędzi do obejścia procesu.
+5. Podaj wynik i zwróconą kwotę wyłącznie na podstawie odpowiedzi narzędzia.
+   Błędy zgłaszaj wprost.
+"""
+
+
+@mcp.prompt(
+    name="zarejestruj_otrzymana_dostawe",
+    title="Zarejestruj otrzymaną dostawę",
+    description="Prowadzi przez rejestrację kompletnej, fizycznie otrzymanej dostawy.",
+)
+def prompt_zarejestruj_otrzymana_dostawe(zamowienie_id: int) -> str:
+    """Przygotowuje bezpieczny scenariusz przyjęcia kompletnej dostawy."""
+    return f"""
+Pomóż zarejestrować fizycznie otrzymaną dostawę do zamówienia nr #{zamowienie_id}.
+
+1. Nie utożsamiaj zatwierdzenia zamówienia z otrzymaniem dostawy. Wymagaj
+   jawnego potwierdzenia użytkownika, że dostawa fizycznie dotarła.
+2. Narzędzie przyjmuje całe zamówienie i nie obsługuje dostaw częściowych ani
+   rozbieżności. Przed wywołaniem potwierdź, że dostarczono wszystkie pozycje
+   i ilości zgodne z zamówieniem. Przy brakach, nadwyżkach, uszkodzeniach lub
+   niepewności nie rejestruj dostawy tym narzędziem.
+3. Wymagaj dokładnego ID i wiarygodnego kontekstu pozycji. Nie zakładaj
+   statusu „zatwierdzone”; jeśli warunki są nieznane, poproś użytkownika
+   o ich sprawdzenie. Nie twierdź, że sprawdziłeś stan w bazie — nie ma
+   narzędzia do odczytu zamówienia.
+4. Dopiero po potwierdzeniu wywołaj rejestruj_dostawe(
+   zamowienie_id={zamowienie_id}) jeden raz. Narzędzie zwiększa stany
+   magazynowe i ustawia status „dostarczone”.
+5. Przedstaw wynik. Nie ponawiaj wywołania po sukcesie; błędy zgłaszaj wprost.
+"""
+
+
+@mcp.prompt(
+    name="sprawdz_polaczenie_spizarnika",
+    title="Sprawdź połączenie ze Spiżarnikiem",
+    description="Wykonuje nieszkodliwy test odpowiedzi serwera MCP.",
+)
+def prompt_sprawdz_polaczenie_spizarnika() -> str:
+    """Przygotowuje prosty scenariusz sprawdzenia połączenia z serwerem."""
+    return """
+Użytkownik prosi o sprawdzenie połączenia z serwerem Spiżarnik.
+
+Wywołaj wyłącznie narzędzie hello_spizarnik i podaj rzeczywisty wynik.
+Nie uruchamiaj narzędzi biznesowych. Nie twierdź, że baza danych ani wszystkie
+funkcje działają, jeśli odpowiedź potwierdza jedynie działanie serwera.
+"""
+
+
+# ==============================================================================
 # MCP TOOLS (Narzędzia Biznesowe i Operacyjne)
 # ==============================================================================
 
